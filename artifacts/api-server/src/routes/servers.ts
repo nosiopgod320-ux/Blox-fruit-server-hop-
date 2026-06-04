@@ -29,6 +29,8 @@ router.get("/stats", async (req, res) => {
 router.get("/servers", async (req, res) => {
   try {
     const seaParam = req.query["sea"];
+    const limit = Math.min(Number(req.query["limit"] ?? 200), 500);
+
     let rows = await db.select().from(serversTable);
 
     if (seaParam) {
@@ -38,17 +40,31 @@ router.get("/servers", async (req, res) => {
       }
     }
 
-    const result = rows.map((s) => ({
-      jobId: s.jobId,
-      placeId: s.placeId,
-      sea: s.sea,
-      firstSeen: s.firstSeen,
-      lastSeen: s.lastSeen,
-      playerCount: s.playerCount,
-      maxPlayers: s.maxPlayers,
-      ageSeconds: Math.floor((Date.now() - Number(s.firstSeen)) / 1000),
-      events: computeEventTimers(s),
-    }));
+    const now = Date.now();
+    const result = rows
+      .map((s) => {
+        const timers = computeEventTimers(s);
+        const nextEvent = Math.min(
+          ...timers
+            .filter((t) => t.timeUntilSeconds !== null && !t.isActive)
+            .map((t) => t.timeUntilSeconds as number),
+          9999999,
+        );
+        return {
+          jobId: s.jobId,
+          placeId: s.placeId,
+          sea: s.sea,
+          firstSeen: s.firstSeen,
+          lastSeen: s.lastSeen,
+          playerCount: s.playerCount,
+          maxPlayers: s.maxPlayers,
+          ageSeconds: Math.floor((now - Number(s.firstSeen)) / 1000),
+          nextEventSeconds: nextEvent,
+          events: timers,
+        };
+      })
+      .sort((a, b) => a.nextEventSeconds - b.nextEventSeconds)
+      .slice(0, limit);
 
     res.json(result);
   } catch (err) {
