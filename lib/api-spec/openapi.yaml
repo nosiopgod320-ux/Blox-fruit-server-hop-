@@ -1,0 +1,180 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: BloxHop API — Blox Fruits server hop assistant
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: servers
+    description: Server tracking operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /stats:
+    get:
+      operationId: getStats
+      tags: [servers]
+      summary: Get tracking stats
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+  /servers:
+    get:
+      operationId: getServers
+      tags: [servers]
+      summary: Get all tracked servers with event timers
+      parameters:
+        - name: sea
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1, 2, 3]
+      responses:
+        "200":
+          description: Server list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ServerWithTimers"
+  /best-servers:
+    get:
+      operationId: getBestServers
+      tags: [servers]
+      summary: Get best servers for a specific event
+      parameters:
+        - name: event
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: within
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Best servers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BestServerEntry"
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    SeaCounts:
+      type: object
+      properties:
+        first:
+          type: integer
+        second:
+          type: integer
+        third:
+          type: integer
+      required: [first, second, third]
+    StatsResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        seaCounts:
+          $ref: "#/components/schemas/SeaCounts"
+        uptimeSeconds:
+          type: integer
+        warmingUp:
+          type: boolean
+      required: [total, seaCounts, uptimeSeconds, warmingUp]
+    EventKey:
+      type: string
+      enum: [fruit, castle, factory, fist, chalice, sword]
+    EventTimer:
+      type: object
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        timeUntilSeconds:
+          type: integer
+          nullable: true
+        timeUntilFormatted:
+          type: string
+          nullable: true
+        isAlert:
+          type: boolean
+        isActive:
+          type: boolean
+      required: [key, name, isAlert, isActive]
+    ServerWithTimers:
+      type: object
+      properties:
+        jobId:
+          type: string
+        placeId:
+          type: integer
+        sea:
+          type: integer
+        firstSeen:
+          type: integer
+        lastSeen:
+          type: integer
+        playerCount:
+          type: integer
+        maxPlayers:
+          type: integer
+        ageSeconds:
+          type: integer
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventTimer"
+      required: [jobId, placeId, sea, firstSeen, lastSeen, playerCount, maxPlayers, ageSeconds, events]
+    BestServerEntry:
+      type: object
+      properties:
+        jobId:
+          type: string
+        placeId:
+          type: integer
+        sea:
+          type: integer
+        playerCount:
+          type: integer
+        maxPlayers:
+          type: integer
+        ageSeconds:
+          type: integer
+        event:
+          $ref: "#/components/schemas/EventTimer"
+      required: [jobId, placeId, sea, playerCount, maxPlayers, ageSeconds, event]
