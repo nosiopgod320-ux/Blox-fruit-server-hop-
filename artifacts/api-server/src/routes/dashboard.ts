@@ -6,26 +6,6 @@ import { isWarmingUp, getUptimeSeconds } from "../lib/poller.js";
 
 const router: IRouter = Router();
 
-interface EventTimer {
-  key: string;
-  name: string;
-  timeUntilSeconds: number | null;
-  timeUntilFormatted: string | null;
-  isAlert: boolean;
-  isActive: boolean;
-}
-
-interface ServerData {
-  jobId: string;
-  placeId: number;
-  sea: number;
-  playerCount: number;
-  maxPlayers: number;
-  ageSeconds: number;
-  nextEventSeconds: number;
-  events: EventTimer[];
-}
-
 router.get("/", async (req, res) => {
   try {
     const allRows = await db.select().from(serversTable);
@@ -42,24 +22,35 @@ router.get("/", async (req, res) => {
     }
 
     const now = Date.now();
-    const servers: ServerData[] = confirmedRows
+
+    type ServerRow = {
+      jobId: string;
+      placeId: string;
+      sea: number;
+      playerCount: number;
+      maxPlayers: number;
+      ageSeconds: number;
+      nextEventSeconds: number;
+      events: ReturnType<typeof computeEventTimers>;
+    };
+
+    const servers: ServerRow[] = confirmedRows
       .map((s) => {
-        const timers = computeEventTimers(s);
-        const nextEvent = Math.min(
-          ...timers
-            .filter((t) => t.timeUntilSeconds !== null && !t.isActive)
-            .map((t) => t.timeUntilSeconds as number),
-          9999999,
-        );
+        const events = computeEventTimers(s);
+        const upcomingTimes = events
+          .filter((t) => t.timeUntilSeconds !== null && !t.isActive)
+          .map((t) => t.timeUntilSeconds as number);
+        const nextEventSeconds =
+          upcomingTimes.length > 0 ? Math.min(...upcomingTimes) : 9999999;
         return {
           jobId: s.jobId,
-          placeId: Number(s.placeId),
+          placeId: s.placeId,
           sea: s.sea,
           playerCount: s.playerCount,
           maxPlayers: s.maxPlayers,
           ageSeconds: Math.floor((now - Number(s.firstSeen)) / 1000),
-          nextEventSeconds: nextEvent,
-          events: timers,
+          nextEventSeconds,
+          events,
         };
       })
       .sort((a, b) => a.nextEventSeconds - b.nextEventSeconds)
@@ -82,18 +73,89 @@ router.get("/", async (req, res) => {
   }
 });
 
-function buildHtml(servers: ServerData[], stats: {
-  total: number;
-  confirmed: number;
-  seaCounts: { first: number; second: number; third: number };
-  uptimeSeconds: number;
-  warmingUp: boolean;
-}): string {
-  const safeJson = JSON.stringify(servers)
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/&/g, "\\u0026");
+const SEA_NAMES: Record<number, string> = {
+  1: "First Sea",
+  2: "Second Sea",
+  3: "Third Sea",
+};
 
+function fmtAge(s: number): string {
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function escAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderCard(s: {
+  jobId: string;
+  placeId: string;
+  sea: number;
+  playerCount: number;
+  maxPlayers: number;
+  ageSeconds: number;
+  nextEventSeconds: number;
+  events: ReturnType<typeof computeEventTimers>;
+}): string {
+  const seaName = SEA_NAMES[s.sea] ?? "Unknown";
+  const seaClass = `sea-${s.sea}`;
+
+  let evHtml = "";
+  for (const e of s.events) {
+    if (e.timeUntilSeconds === null && !e.isActive) continue;
+    const cls = e.isActive ? "on" : e.isAlert ? "alert" : "";
+    const t = e.isActive ? "⚡ ACTIVE" : (e.timeUntilFormatted ?? "—");
+    evHtml += `<div class="ev ${cls}"><span class="ev-name">${e.name}</span><span class="ev-time">${t}</span></div>`;
+  }
+  if (!evHtml) {
+    evHtml = `<div class="ev"><span class="ev-name muted">No events</span></div>`;
+  }
+
+  // Compact event data for Best Servers tab — key:seconds pairs, active=-1
+  const eventData = s.events
+    .map((e) => {
+      const t = e.isActive ? -1 : (e.timeUntilSeconds ?? 9999999);
+      return `${e.key}:${t}`;
+    })
+    .join(",");
+
+  const safeJobId = escAttr(s.jobId);
+  const safePlaceId = escAttr(s.placeId);
+
+  return `<div class="card" data-sea="${s.sea}" data-next="${s.nextEventSeconds}" data-age="${s.ageSeconds}" data-players="${s.playerCount}" data-events="${escAttr(eventData)}">
+  <div class="card-header">
+    <span class="sea-badge ${seaClass}">${seaName}</span>
+    <span class="card-age">Age: ${fmtAge(s.ageSeconds)}</span>
+  </div>
+  <div class="card-players">👥 ${s.playerCount} / ${s.maxPlayers} players</div>
+  <div class="events">${evHtml}</div>
+  <button class="join-btn" data-place="${safePlaceId}" data-job="${safeJobId}">⚓ Join Server</button>
+</div>`;
+}
+
+type ServerRow = {
+  jobId: string;
+  placeId: string;
+  sea: number;
+  playerCount: number;
+  maxPlayers: number;
+  ageSeconds: number;
+  nextEventSeconds: number;
+  events: ReturnType<typeof computeEventTimers>;
+};
+
+function buildHtml(
+  servers: ServerRow[],
+  stats: {
+    total: number;
+    confirmed: number;
+    seaCounts: { first: number; second: number; third: number };
+    uptimeSeconds: number;
+    warmingUp: boolean;
+  },
+): string {
   const uptimeDisplay = (() => {
     const s = stats.uptimeSeconds;
     const h = Math.floor(s / 3600);
@@ -107,6 +169,10 @@ function buildHtml(servers: ServerData[], stats: {
         Scan 1 done. Next scan at ~10 min mark. This banner disappears automatically.
        </div>`
     : "";
+
+  // Cards pre-sorted by next event server-side
+  const cardsHtml = servers.map(renderCard).join("\n");
+  const cardCount = servers.length;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -143,6 +209,7 @@ select:focus{outline:none;border-color:var(--accent)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;padding:20px 24px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;transition:border-color .15s}
 .card:hover{border-color:var(--accent)}
+.card.hidden{display:none}
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:8px}
 .sea-badge{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:3px 8px;border-radius:5px}
 .sea-1{background:#1e3a5f;color:var(--sea1)}
@@ -155,14 +222,16 @@ select:focus{outline:none;border-color:var(--accent)}
 .ev.alert{background:#451a03;color:var(--alert)}
 .ev.on{background:#052e16;color:var(--active);font-weight:700}
 .ev-name{color:var(--muted)}
-.ev.alert .ev-name{color:var(--alert)}
-.ev.on .ev-name{color:var(--active)}
+.ev.alert .ev-name,.ev.on .ev-name{color:inherit}
+.muted{color:var(--muted)}
 .ev-time{font-weight:600;font-variant-numeric:tabular-nums}
 .join-btn{width:100%;padding:8px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-weight:700;cursor:pointer;font-size:.85rem;transition:background .15s}
 .join-btn:hover{background:var(--accent2)}
 .empty{padding:60px 24px;text-align:center;color:var(--muted)}
 .best-controls{padding:16px 24px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 #count-badge{font-size:.8rem;color:var(--muted);margin-left:4px}
+#best-grid .card{display:none}
+#best-grid .card.match{display:block}
 @media(max-width:600px){header{padding:12px 16px}.grid{padding:12px 16px;gap:10px}.controls{padding:12px 16px}.stats-bar{gap:12px}}
 </style>
 </head>
@@ -180,33 +249,36 @@ select:focus{outline:none;border-color:var(--accent)}
 ${warmingHtml}
 <div class="topbar">
   <span>✅ ${stats.confirmed} confirmed servers loaded</span>
-  <a onclick="window.location.reload()">↻ Refresh</a>
+  <a href="javascript:location.reload()">↻ Refresh</a>
 </div>
 <div class="tab-bar">
-  <div class="tab active" id="tab-all" onclick="switchTab('all')">All Servers <span id="count-badge"></span></div>
+  <div class="tab active" id="tab-all" onclick="switchTab('all')">All Servers <span id="count-badge">(${cardCount})</span></div>
   <div class="tab" id="tab-best" onclick="switchTab('best')">Best Servers</div>
 </div>
 
 <div id="pane-all">
   <div class="controls">
-    <button class="btn active" id="btn-all" onclick="setFilter(0)">All Seas</button>
+    <button class="btn active" id="btn-0" onclick="setFilter(0)">All Seas</button>
     <button class="btn sea1btn" id="btn-1" onclick="setFilter(1)">First Sea</button>
     <button class="btn sea2btn" id="btn-2" onclick="setFilter(2)">Second Sea</button>
     <button class="btn sea3btn" id="btn-3" onclick="setFilter(3)">Third Sea</button>
     <span class="sort-lbl" style="margin-left:8px">Sort:</span>
-    <select id="sort-sel" onchange="render()">
+    <select id="sort-sel" onchange="applySort()">
       <option value="event" selected>Next Event</option>
       <option value="age">Server Age</option>
       <option value="players">Players</option>
     </select>
   </div>
-  <div id="grid-all" class="grid"></div>
+  <div id="all-grid" class="grid">
+${cardsHtml}
+  </div>
+  <div id="all-empty" class="empty" style="display:none">No servers match this filter.</div>
 </div>
 
 <div id="pane-best" style="display:none">
   <div class="best-controls">
     <label style="font-size:.85rem;color:var(--muted)">Event:</label>
-    <select id="best-event" onchange="renderBest()">
+    <select id="best-event" onchange="applyBest()">
       <option value="fruit">Fruit Spawn</option>
       <option value="castle">Castle Raid</option>
       <option value="factory">Factory Raid</option>
@@ -215,135 +287,125 @@ ${warmingHtml}
       <option value="sword">Sword Dealer</option>
     </select>
     <label style="font-size:.85rem;color:var(--muted)">Within:</label>
-    <select id="best-within" onchange="renderBest()">
+    <select id="best-within" onchange="applyBest()">
       <option value="120">2 min</option>
       <option value="300" selected>5 min</option>
       <option value="600">10 min</option>
       <option value="900">15 min</option>
       <option value="1800">30 min</option>
     </select>
+    <span id="best-count" style="font-size:.8rem;color:var(--muted)"></span>
   </div>
-  <div id="grid-best" class="grid"><div class="empty">Choose an event above to find the best servers.</div></div>
+  <div id="best-grid" class="grid">
+${cardsHtml}
+  </div>
+  <div id="best-empty" class="empty" style="display:none">No servers with this event firing in the selected window.</div>
 </div>
 
-<script id="bloxhop-data" type="application/json">${safeJson}</script>
 <script>
-(function(){
-  var SEA = {1:'First Sea', 2:'Second Sea', 3:'Third Sea'};
-  var allServers = JSON.parse(document.getElementById('bloxhop-data').textContent);
-  var seaFilter = 0;
+var seaFilter = 0;
 
-  function fmtAge(s){
-    var m=Math.floor(s/60);
-    if(m<60) return m+'m';
-    return Math.floor(m/60)+'h '+(m%60)+'m';
+function setFilter(sea) {
+  seaFilter = sea;
+  for (var i = 0; i <= 3; i++) {
+    var b = document.getElementById('btn-' + i);
+    if (b) b.classList.toggle('active', i === sea);
+  }
+  applyFilter();
+}
+
+function applyFilter() {
+  var sortBy = document.getElementById('sort-sel').value;
+  var grid = document.getElementById('all-grid');
+  var cards = Array.prototype.slice.call(grid.querySelectorAll('.card'));
+
+  // Filter
+  var visible = [];
+  for (var i = 0; i < cards.length; i++) {
+    var c = cards[i];
+    var s = parseInt(c.getAttribute('data-sea'), 10);
+    var show = seaFilter === 0 || s === seaFilter;
+    c.classList.toggle('hidden', !show);
+    if (show) visible.push(c);
   }
 
-  function makeCard(s){
-    var seaName = SEA[s.sea] || 'Unknown';
-    var evHtml = '';
-    var events = s.events || [];
-    for(var i=0;i<events.length;i++){
-      var e=events[i];
-      if(e.timeUntilSeconds===null && !e.isActive) continue;
-      var cls = e.isActive ? 'on' : (e.isAlert ? 'alert' : '');
-      var t = e.isActive ? '⚡ ACTIVE' : (e.timeUntilFormatted || '—');
-      evHtml += '<div class="ev '+cls+'"><span class="ev-name">'+e.name+'</span><span class="ev-time">'+t+'</span></div>';
-    }
-    if(!evHtml) evHtml = '<div class="ev"><span class="ev-name" style="color:var(--muted)">No events</span></div>';
-    var joinUrl = 'roblox://experiences/start?placeId='+s.placeId+'&gameInstanceId='+encodeURIComponent(s.jobId);
-    return '<div class="card">'
-      +'<div class="card-header"><span class="sea-badge sea-'+s.sea+'">'+seaName+'</span><span class="card-age">Age: '+fmtAge(s.ageSeconds)+'</span></div>'
-      +'<div class="card-players">👥 '+s.playerCount+' / '+s.maxPlayers+' players</div>'
-      +'<div class="events">'+evHtml+'</div>'
-      +'<button class="join-btn" onclick="joinServer(\''+s.placeId+'\',\''+s.jobId+'\')">⚓ Join Server</button>'
-      +'</div>';
-  }
+  // Sort visible cards
+  visible.sort(function(a, b) {
+    if (sortBy === 'age') return parseInt(b.getAttribute('data-age'), 10) - parseInt(a.getAttribute('data-age'), 10);
+    if (sortBy === 'players') return parseInt(b.getAttribute('data-players'), 10) - parseInt(a.getAttribute('data-players'), 10);
+    return parseInt(a.getAttribute('data-next'), 10) - parseInt(b.getAttribute('data-next'), 10);
+  });
 
-  window.joinServer = function(placeId, jobId){
-    window.location.href = 'roblox://experiences/start?placeId='+placeId+'&gameInstanceId='+encodeURIComponent(jobId);
-  };
+  // Re-append in sorted order (hidden cards go to end)
+  var hidden = cards.filter(function(c) { return c.classList.contains('hidden'); });
+  for (var j = 0; j < visible.length; j++) grid.appendChild(visible[j]);
+  for (var k = 0; k < hidden.length; k++) grid.appendChild(hidden[k]);
 
-  window.setFilter = function(sea){
-    seaFilter = sea;
-    var ids = ['all','1','2','3'];
-    for(var i=0;i<ids.length;i++){
-      var el = document.getElementById('btn-'+ids[i]);
-      if(el) el.classList.remove('active');
-    }
-    var target = sea === 0 ? 'btn-all' : 'btn-'+sea;
-    var btn = document.getElementById(target);
-    if(btn) btn.classList.add('active');
-    render();
-  };
+  var badge = document.getElementById('count-badge');
+  if (badge) badge.textContent = '(' + visible.length + ')';
+  document.getElementById('all-empty').style.display = visible.length === 0 ? '' : 'none';
+}
 
-  window.render = function(){
-    var sortBy = (document.getElementById('sort-sel')||{}).value || 'event';
-    var list = seaFilter
-      ? allServers.filter(function(s){ return Number(s.sea) === Number(seaFilter); })
-      : allServers.slice();
+function applySort() { applyFilter(); }
 
-    if(sortBy==='age'){
-      list.sort(function(a,b){ return b.ageSeconds - a.ageSeconds; });
-    } else if(sortBy==='players'){
-      list.sort(function(a,b){ return b.playerCount - a.playerCount; });
-    } else {
-      list.sort(function(a,b){ return (a.nextEventSeconds||9999999)-(b.nextEventSeconds||9999999); });
-    }
+function applyBest() {
+  var eventKey = document.getElementById('best-event').value;
+  var within = parseInt(document.getElementById('best-within').value, 10);
+  var grid = document.getElementById('best-grid');
+  var cards = Array.prototype.slice.call(grid.querySelectorAll('.card'));
+  var matches = [];
 
-    var grid = document.getElementById('grid-all');
-    var badge = document.getElementById('count-badge');
-    if(!list.length){
-      grid.innerHTML = '<div class="empty">No confirmed servers yet — check back after the 2nd scan (~10 min).</div>';
-      if(badge) badge.textContent = '';
-    } else {
-      grid.innerHTML = list.map(makeCard).join('');
-      if(badge) badge.textContent = '('+list.length+')';
-    }
-  };
-
-  window.renderBest = function(){
-    var eventKey = (document.getElementById('best-event')||{}).value || 'fruit';
-    var within = Number((document.getElementById('best-within')||{}).value || 300);
-    var matches = allServers.filter(function(s){
-      var evts = s.events || [];
-      for(var i=0;i<evts.length;i++){
-        var e=evts[i];
-        if(e.key===eventKey && e.timeUntilSeconds!==null && e.timeUntilSeconds<=within) return true;
-        if(e.key===eventKey && e.isActive) return true;
-      }
-      return false;
-    });
-    matches.sort(function(a,b){
-      function getTime(s){
-        var evts=s.events||[];
-        for(var i=0;i<evts.length;i++){
-          if(evts[i].key===eventKey) return evts[i].isActive ? -1 : (evts[i].timeUntilSeconds||9999);
+  for (var i = 0; i < cards.length; i++) {
+    var c = cards[i];
+    var raw = c.getAttribute('data-events') || '';
+    var pairs = raw.split(',');
+    var found = false;
+    var eta = 9999999;
+    for (var j = 0; j < pairs.length; j++) {
+      var parts = pairs[j].split(':');
+      if (parts[0] === eventKey) {
+        var t = parseInt(parts[1], 10);
+        if (t === -1 || (t >= 0 && t <= within)) {
+          found = true;
+          eta = t === -1 ? 0 : t;
         }
-        return 9999;
+        break;
       }
-      return getTime(a)-getTime(b);
-    });
-    var grid = document.getElementById('grid-best');
-    if(!matches.length){
-      grid.innerHTML = '<div class="empty">No servers with '+eventKey+' firing within '+Math.floor(within/60)+' min.<br>Try a larger time window.</div>';
-    } else {
-      grid.innerHTML = matches.map(makeCard).join('');
     }
-  };
+    c.classList.toggle('match', found);
+    if (found) matches.push({ card: c, eta: eta });
+  }
 
-  window.switchTab = function(tab){
-    document.getElementById('pane-all').style.display = tab==='all' ? '' : 'none';
-    document.getElementById('pane-best').style.display = tab==='best' ? '' : 'none';
-    document.getElementById('tab-all').classList.toggle('active', tab==='all');
-    document.getElementById('tab-best').classList.toggle('active', tab==='best');
-    if(tab==='best') renderBest();
-  };
+  // Sort matches by eta ascending
+  matches.sort(function(a, b) { return a.eta - b.eta; });
+  for (var m = 0; m < matches.length; m++) grid.appendChild(matches[m].card);
 
-  render();
+  var countEl = document.getElementById('best-count');
+  if (countEl) countEl.textContent = matches.length ? matches.length + ' server' + (matches.length > 1 ? 's' : '') : '';
+  document.getElementById('best-empty').style.display = matches.length === 0 ? '' : 'none';
+}
 
-  setTimeout(function(){ window.location.reload(); }, 30000);
-})();
+function switchTab(tab) {
+  document.getElementById('pane-all').style.display = tab === 'all' ? '' : 'none';
+  document.getElementById('pane-best').style.display = tab === 'best' ? '' : 'none';
+  document.getElementById('tab-all').classList.toggle('active', tab === 'all');
+  document.getElementById('tab-best').classList.toggle('active', tab === 'best');
+  if (tab === 'best') applyBest();
+}
+
+// Join button via event delegation — no inline JS in card HTML
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('.join-btn');
+  if (!btn) return;
+  var placeId = btn.getAttribute('data-place');
+  var jobId = btn.getAttribute('data-job');
+  if (placeId && jobId) {
+    window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + encodeURIComponent(jobId);
+  }
+});
+
+// Auto-refresh every 30s
+setTimeout(function() { location.reload(); }, 30000);
 </script>
 </body>
 </html>`;
