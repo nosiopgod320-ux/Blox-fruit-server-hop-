@@ -1,5 +1,5 @@
 import { db, serversTable } from "@workspace/db";
-import { eq, and, lt } from "drizzle-orm";
+import { eq, lt, sql } from "drizzle-orm";
 import { fetchAllServers } from "./roblox-api.js";
 import { SEA_PLACE_IDS, MAX_SERVER_AGE_SECONDS } from "./events.js";
 import { logger } from "./logger.js";
@@ -50,13 +50,19 @@ export async function scanSea(sea: number): Promise<void> {
       lastSeen: nowMs,
       playerCount: s.playing,
       maxPlayers: s.maxPlayers,
+      scanCount: 1,
     }).onConflictDoNothing();
   }
 
   for (const s of toUpdate) {
     await db
       .update(serversTable)
-      .set({ lastSeen: nowMs, playerCount: s.playing })
+      .set({
+        lastSeen: nowMs,
+        playerCount: s.playing,
+        maxPlayers: s.maxPlayers,
+        scanCount: sql`${serversTable.scanCount} + 1`,
+      })
       .where(eq(serversTable.jobId, s.id));
   }
 
