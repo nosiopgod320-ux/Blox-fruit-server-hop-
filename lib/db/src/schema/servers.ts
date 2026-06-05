@@ -8,6 +8,7 @@ export const serversTable = pgTable("servers", {
   lastSeen: bigint("last_seen", { mode: "number" }).notNull(),
   playerCount: integer("player_count").notNull().default(0),
   maxPlayers: integer("max_players").notNull().default(0),
+  scanCount: integer("scan_count").notNull().default(1),
 });
 
 export type Server = typeof serversTable.$inferSelect;
