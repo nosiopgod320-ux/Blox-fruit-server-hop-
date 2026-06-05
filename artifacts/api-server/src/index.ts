@@ -1,7 +1,7 @@
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
 import { startPoller } from "./lib/poller.js";
-import { ensureSchema } from "@workspace/db";
+import { ensureSchema, pool } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
 
@@ -40,6 +40,14 @@ function startSelfPing(): void {
 // where requests arrive before the scan_count column has been added.
 await ensureSchema();
 logger.info("Database schema ready");
+
+// Reset tracking session: any servers left in the DB from a previous run get
+// their first_seen reset to NOW and scan_count reset to 1. This means:
+//   • Server ages start at 0 the moment this process starts — no stale ages.
+//   • Every server needs one more confirmation scan before appearing on the
+//     dashboard, so the first batch of confirmed servers shows ~10-min-old ages.
+await pool.query(`UPDATE servers SET first_seen = $1, scan_count = 1`, [Date.now()]);
+logger.info("Session reset — all server ages start from 0");
 
 app.listen(port, () => {
   logger.info({ port }, "Server listening");
