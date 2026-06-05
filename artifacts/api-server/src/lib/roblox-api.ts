@@ -1,6 +1,6 @@
 import { logger } from "./logger.js";
 
-const MAX_PAGES_PER_SEA = 3;
+const MAX_PAGES_PER_SEA = 5;
 const PAGE_DELAY_MS_NO_COOKIE = 10_000;
 const PAGE_DELAY_MS_WITH_COOKIE = 3_000;
 
