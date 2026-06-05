@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, serversTable } from "@workspace/db";
-import { gte } from "drizzle-orm";
+import { eq, gte } from "drizzle-orm";
 import { computeEventTimers } from "../lib/calculator.js";
 import { isWarmingUp, getUptimeSeconds } from "../lib/poller.js";
 
@@ -8,11 +8,11 @@ const router: IRouter = Router();
 
 router.get("/", async (req, res) => {
   try {
-    const allRows = await db.select().from(serversTable);
-    const confirmedRows = await db
-      .select()
-      .from(serversTable)
-      .where(gte(serversTable.scanCount, 2));
+    const [allRows, confirmedRows, newRows] = await Promise.all([
+      db.select().from(serversTable),
+      db.select().from(serversTable).where(gte(serversTable.scanCount, 2)),
+      db.select().from(serversTable).where(eq(serversTable.scanCount, 1)),
+    ]);
 
     const seaCounts = { first: 0, second: 0, third: 0 };
     for (const s of allRows) {
@@ -44,7 +44,7 @@ router.get("/", async (req, res) => {
           upcomingTimes.length > 0 ? Math.min(...upcomingTimes) : 9999999;
         return {
           jobId: s.jobId,
-          placeId: s.placeId,
+          placeId: String(s.placeId),
           sea: s.sea,
           playerCount: s.playerCount,
           maxPlayers: s.maxPlayers,
@@ -64,9 +64,30 @@ router.get("/", async (req, res) => {
       warmingUp: isWarmingUp() || confirmedRows.length === 0,
     };
 
+    const newServerCards = newRows.map((s) => {
+      const ageSec = Math.floor((now - Number(s.firstSeen)) / 1000);
+      const seaName = SEA_NAMES[s.sea] ?? "Unknown";
+      const seaClass = `sea-${s.sea}`;
+      const safeJob = escAttr(String(s.jobId));
+      const safePlace = escAttr(String(s.placeId));
+      const minsUntilConfirm = Math.max(0, Math.ceil((10 * 60 - ageSec) / 60));
+      return `<div class="card new-card" data-sea="${s.sea}">
+  <div class="card-header">
+    <span class="sea-badge ${seaClass}">${seaName}</span>
+    <span class="card-age">Found ${fmtAge(ageSec)} ago</span>
+  </div>
+  <div class="card-players">👥 ${s.playerCount} / ${s.maxPlayers} players</div>
+  <div class="events">
+    <div class="ev"><span class="ev-name muted">⏳ Confirming — appears on dashboard in ~${minsUntilConfirm}m</span></div>
+    <div class="ev"><span class="ev-name muted">Age starts at 0 — event timers begin after confirmation</span></div>
+  </div>
+  <button class="join-btn" data-place="${safePlace}" data-job="${safeJob}">⚓ Join Server</button>
+</div>`;
+    });
+
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "no-store");
-    res.send(buildHtml(servers, stats));
+    res.send(buildHtml(servers, newServerCards, stats));
   } catch (err) {
     req.log.error({ err }, "Dashboard render error");
     res.status(500).send("<h1>Server error — try refreshing</h1>");
@@ -148,6 +169,7 @@ type ServerRow = {
 
 function buildHtml(
   servers: ServerRow[],
+  newServerCards: string[],
   stats: {
     total: number;
     confirmed: number;
@@ -253,6 +275,7 @@ ${warmingHtml}
 </div>
 <div class="tab-bar">
   <div class="tab active" id="tab-all" onclick="switchTab('all')">All Servers <span id="count-badge">(${cardCount})</span></div>
+  <div class="tab" id="tab-new" onclick="switchTab('new')">New Servers <span style="font-size:.75rem;background:#1a3a1a;color:#4ade80;padding:2px 7px;border-radius:10px;margin-left:4px">${newServerCards.length}</span></div>
   <div class="tab" id="tab-best" onclick="switchTab('best')">Best Servers</div>
 </div>
 
@@ -273,6 +296,21 @@ ${warmingHtml}
 ${cardsHtml}
   </div>
   <div id="all-empty" class="empty" style="display:none">No servers match this filter.</div>
+</div>
+
+<div id="pane-new" style="display:none">
+  <div style="padding:12px 24px;font-size:.82rem;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface)">
+    🆕 <strong style="color:var(--text)">Servers found in the latest scan</strong> — these just appeared and will move to <em>All Servers</em> once the next scan confirms them (~10 min). Age starts at <strong style="color:var(--active)">0</strong> when first discovered.
+  </div>
+  <div id="new-controls" style="padding:12px 24px;display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
+    <button class="btn active" id="nbtn-0" onclick="setNewFilter(0)">All Seas</button>
+    <button class="btn sea1btn" id="nbtn-1" onclick="setNewFilter(1)">First Sea</button>
+    <button class="btn sea2btn" id="nbtn-2" onclick="setNewFilter(2)">Second Sea</button>
+    <button class="btn sea3btn" id="nbtn-3" onclick="setNewFilter(3)">Third Sea</button>
+  </div>
+  <div id="new-grid" class="grid">
+    ${newServerCards.length > 0 ? newServerCards.join("\n") : '<div class="empty">No new servers right now — scan in progress…</div>'}
+  </div>
 </div>
 
 <div id="pane-best" style="display:none">
@@ -387,10 +425,26 @@ function applyBest() {
 
 function switchTab(tab) {
   document.getElementById('pane-all').style.display = tab === 'all' ? '' : 'none';
+  document.getElementById('pane-new').style.display = tab === 'new' ? '' : 'none';
   document.getElementById('pane-best').style.display = tab === 'best' ? '' : 'none';
   document.getElementById('tab-all').classList.toggle('active', tab === 'all');
+  document.getElementById('tab-new').classList.toggle('active', tab === 'new');
   document.getElementById('tab-best').classList.toggle('active', tab === 'best');
   if (tab === 'best') applyBest();
+}
+
+var newSeaFilter = 0;
+function setNewFilter(sea) {
+  newSeaFilter = sea;
+  for (var i = 0; i <= 3; i++) {
+    var b = document.getElementById('nbtn-' + i);
+    if (b) b.classList.toggle('active', i === sea);
+  }
+  var cards = document.querySelectorAll('#new-grid .card');
+  for (var j = 0; j < cards.length; j++) {
+    var s = parseInt(cards[j].getAttribute('data-sea'), 10);
+    cards[j].classList.toggle('hidden', sea !== 0 && s !== sea);
+  }
 }
 
 // Join button via event delegation — no inline JS in card HTML
