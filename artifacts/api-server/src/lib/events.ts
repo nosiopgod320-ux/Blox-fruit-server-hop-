@@ -66,7 +66,7 @@ export const EVENTS: EventDef[] = [
     key: "sword",
     name: "Legendary Sword Dealer",
     intervalSeconds: 0,
-    seas: [1, 2, 3],
+    seas: [2],
     spawnAtSeconds: 255 * 60,
     despawnAtSeconds: 270 * 60,
   },
