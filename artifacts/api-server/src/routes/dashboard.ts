@@ -121,8 +121,8 @@ function renderCard(s: {
     })
     .join(",");
 
-  const safeJobId = escAttr(s.jobId);
-  const safePlaceId = escAttr(s.placeId);
+  const safeJobId = escAttr(String(s.jobId));
+  const safePlaceId = escAttr(String(s.placeId));
 
   return `<div class="card" data-sea="${s.sea}" data-next="${s.nextEventSeconds}" data-age="${s.ageSeconds}" data-players="${s.playerCount}" data-events="${escAttr(eventData)}">
   <div class="card-header">
