@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, serversTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, gte } from "drizzle-orm";
 import { computeEventTimers } from "../lib/calculator.js";
 import { isWarmingUp, getUptimeSeconds } from "../lib/poller.js";
 
@@ -31,7 +31,10 @@ router.get("/servers", async (req, res) => {
     const seaParam = req.query["sea"];
     const limit = Math.min(Number(req.query["limit"] ?? 200), 500);
 
-    let rows = await db.select().from(serversTable);
+    let rows = await db
+      .select()
+      .from(serversTable)
+      .where(gte(serversTable.scanCount, 2));
 
     if (seaParam) {
       const seaNum = Number(seaParam);
@@ -78,9 +81,12 @@ router.get("/best-servers", async (req, res) => {
     const eventKey = String(req.query["event"] ?? "fruit");
     const within = Number(req.query["within"] ?? 300);
 
-    const rows = await db.select().from(serversTable);
-    const results = [];
+    const rows = await db
+      .select()
+      .from(serversTable)
+      .where(gte(serversTable.scanCount, 2));
 
+    const results = [];
     for (const s of rows) {
       const timers = computeEventTimers(s);
       const timer = timers.find((t) => t.key === eventKey);
