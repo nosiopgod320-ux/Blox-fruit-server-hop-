@@ -1,6 +1,7 @@
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
 import { startPoller } from "./lib/poller.js";
+import { ensureSchema } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
 
@@ -35,12 +36,13 @@ function startSelfPing(): void {
   logger.info({ target, intervalMin: 14 }, "Self-ping started");
 }
 
-app.listen(port, async (err?: Error) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
-  }
+// Ensure DB schema exists BEFORE starting to listen — prevents race condition
+// where requests arrive before the scan_count column has been added.
+await ensureSchema();
+logger.info("Database schema ready");
+
+app.listen(port, () => {
   logger.info({ port }, "Server listening");
   startSelfPing();
-  await startPoller();
+  startPoller();
 });
