@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { db, serversTable } from "@workspace/db";
-import { eq, gte } from "drizzle-orm";
+import { db, serversTable, expiredServersTable } from "@workspace/db";
+import { desc, eq, gte } from "drizzle-orm";
 import { computeEventTimers } from "../lib/calculator.js";
 import { isWarmingUp, getUptimeSeconds } from "../lib/poller.js";
 
@@ -73,6 +73,24 @@ router.get("/servers", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to get servers");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/check", async (req, res) => {
+  try {
+    const jobId = String(req.query["jobId"] ?? "").trim();
+    if (!jobId) return res.status(400).json({ error: "jobId required" });
+    const rows = await db
+      .select()
+      .from(serversTable)
+      .where(eq(serversTable.jobId, jobId));
+    if (rows.length > 0) {
+      return res.json({ alive: true, placeId: String(rows[0]!.placeId), jobId });
+    }
+    return res.json({ alive: false, jobId });
+  } catch (err) {
+    req.log.error({ err }, "Failed to check server");
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 
