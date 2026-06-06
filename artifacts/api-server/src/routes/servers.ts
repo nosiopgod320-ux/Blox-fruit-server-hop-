@@ -78,6 +78,25 @@ router.get("/servers", async (req, res) => {
   }
 });
 
+router.get("/new-servers", async (req, res) => {
+  try {
+    const rows = await db.select().from(serversTable).where(eq(serversTable.scanCount, 1));
+    res.json(
+      rows.map((s) => ({
+        jobId: s.jobId,
+        placeId: String(s.placeId),
+        sea: s.sea,
+        firstSeen: Number(s.firstSeen),
+        playerCount: s.playerCount,
+        maxPlayers: s.maxPlayers,
+      })),
+    );
+  } catch (err) {
+    req.log.error({ err }, "Failed to get new servers");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/check", async (req, res) => {
   try {
     const jobId = String(req.query["jobId"] ?? "").trim();
