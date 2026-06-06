@@ -55,6 +55,52 @@ async function fetchPageWithRetry(
   return res;
 }
 
+/**
+ * Checks whether a specific server instance is currently alive on Roblox.
+ * Scans pages with no inter-page delay and short-circuits as soon as the
+ * jobId is found. Returns false if not found after scanning all pages or
+ * if the request times out.
+ */
+export async function checkServerAlive(
+  placeId: string,
+  jobId: string,
+): Promise<boolean> {
+  let cursor: string | null = null;
+  let pagesFetched = 0;
+  const MAX_CHECK_PAGES = 5;
+
+  while (pagesFetched < MAX_CHECK_PAGES) {
+    const url = cursor
+      ? `https://games.roblox.com/v1/games/${placeId}/servers/Public?limit=100&cursor=${encodeURIComponent(cursor)}`
+      : `https://games.roblox.com/v1/games/${placeId}/servers/Public?limit=100`;
+
+    let res: Response;
+    try {
+      res = await fetchPageWithRetry(url);
+    } catch {
+      return false;
+    }
+
+    if (!res.ok) return false;
+
+    const data = (await res.json()) as {
+      data: { id: string }[];
+      nextPageCursor?: string | null;
+    };
+
+    for (const s of data.data ?? []) {
+      if (s.id === jobId) return true;
+    }
+
+    pagesFetched++;
+    cursor = data.nextPageCursor ?? null;
+    if (!cursor) break;
+    // No delay between pages — this is a quick point-check, not a bulk scan
+  }
+
+  return false;
+}
+
 export async function fetchAllServers(placeId: string): Promise<RobloxServer[]> {
   const hasCookie = !!process.env["ROBLOX_COOKIE"]?.trim();
   const pageDelay = hasCookie ? PAGE_DELAY_MS_WITH_COOKIE : PAGE_DELAY_MS_NO_COOKIE;
