@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { db, serversTable } from "@workspace/db";
-import { eq, gte } from "drizzle-orm";
+import { db, serversTable, expiredServersTable } from "@workspace/db";
+import { desc, eq, gte } from "drizzle-orm";
 import { computeEventTimers } from "../lib/calculator.js";
 import { isWarmingUp, getUptimeSeconds } from "../lib/poller.js";
 
@@ -8,10 +8,11 @@ const router: IRouter = Router();
 
 router.get("/", async (req, res) => {
   try {
-    const [allRows, confirmedRows, newRows] = await Promise.all([
+    const [allRows, confirmedRows, newRows, expiredRows] = await Promise.all([
       db.select().from(serversTable),
       db.select().from(serversTable).where(gte(serversTable.scanCount, 2)),
       db.select().from(serversTable).where(eq(serversTable.scanCount, 1)),
+      db.select().from(expiredServersTable).orderBy(desc(expiredServersTable.expiredAt)).limit(60),
     ]);
 
     const seaCounts = { first: 0, second: 0, third: 0 };
@@ -85,9 +86,28 @@ router.get("/", async (req, res) => {
 </div>`;
     });
 
+    const expiredCards = expiredRows.map((s) => {
+      const livedSec = Math.floor((Number(s.lastSeen) - Number(s.firstSeen)) / 1000);
+      const agoSec = Math.floor((now - Number(s.expiredAt)) / 1000);
+      const seaName = SEA_NAMES[s.sea] ?? "Unknown";
+      const seaClass = `sea-${s.sea}`;
+      return `<div class="card expired-card" data-sea="${s.sea}">
+  <div class="card-header">
+    <span class="sea-badge ${seaClass}">${seaName}</span>
+    <span class="card-age" style="color:var(--del)">Expired ${fmtAge(agoSec)} ago</span>
+  </div>
+  <div class="card-players">👥 ${s.playerCount} / ${s.maxPlayers} players at expiry</div>
+  <div class="events">
+    <div class="ev"><span class="ev-name">⏱️ Lived</span><span class="ev-time">${fmtAge(livedSec)}</span></div>
+    <div class="ev"><span class="ev-name">🔍 Scans</span><span class="ev-time">${s.scanCount}</span></div>
+  </div>
+  <button class="join-btn" style="background:var(--del);cursor:not-allowed;opacity:.6" disabled>❌ Expired</button>
+</div>`;
+    });
+
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "no-store");
-    res.send(buildHtml(servers, newServerCards, stats));
+    res.send(buildHtml(servers, newServerCards, expiredCards, stats));
   } catch (err) {
     req.log.error({ err }, "Dashboard render error");
     res.status(500).send("<h1>Server error — try refreshing</h1>");
@@ -170,6 +190,7 @@ type ServerRow = {
 function buildHtml(
   servers: ServerRow[],
   newServerCards: string[],
+  expiredCards: string[],
   stats: {
     total: number;
     confirmed: number;
@@ -203,7 +224,7 @@ function buildHtml(
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>BloxHop — Blox Fruits Server Hop</title>
 <style>
-:root{--bg:#0e0e12;--surface:#17171f;--surface2:#1f1f2a;--border:#2a2a38;--accent:#7c3aed;--accent2:#a855f7;--text:#e2e2f0;--muted:#7a7a9a;--alert:#f59e0b;--active:#22c55e;--sea1:#3b82f6;--sea2:#10b981;--sea3:#f59e0b}
+:root{--bg:#0e0e12;--surface:#17171f;--surface2:#1f1f2a;--border:#2a2a38;--accent:#7c3aed;--accent2:#a855f7;--text:#e2e2f0;--muted:#7a7a9a;--alert:#f59e0b;--active:#22c55e;--del:#ef4444;--sea1:#3b82f6;--sea2:#10b981;--sea3:#f59e0b}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
 header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
@@ -277,6 +298,7 @@ ${warmingHtml}
   <div class="tab active" id="tab-all" onclick="switchTab('all')">All Servers <span id="count-badge">(${cardCount})</span></div>
   <div class="tab" id="tab-new" onclick="switchTab('new')">New Servers <span style="font-size:.75rem;background:#1a3a1a;color:#4ade80;padding:2px 7px;border-radius:10px;margin-left:4px">${newServerCards.length}</span></div>
   <div class="tab" id="tab-best" onclick="switchTab('best')">Best Servers</div>
+  <div class="tab" id="tab-expired" onclick="switchTab('expired')">Expired <span style="font-size:.75rem;background:#2a1a1a;color:#f87171;padding:2px 7px;border-radius:10px;margin-left:4px">${expiredCards.length}</span></div>
 </div>
 
 <div id="pane-all">
@@ -338,6 +360,21 @@ ${cardsHtml}
 ${cardsHtml}
   </div>
   <div id="best-empty" class="empty" style="display:none">No servers with this event firing in the selected window.</div>
+</div>
+
+<div id="pane-expired" style="display:none">
+  <div style="padding:12px 24px;font-size:.82rem;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface)">
+    💀 <strong style="color:var(--text)">Recently expired servers</strong> — disappeared during the last scan. Shows how long each server lived and its player count at the time.
+  </div>
+  <div id="expired-controls" style="padding:12px 24px;display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
+    <button class="btn active" id="ebtn-0" onclick="setExpiredFilter(0)">All Seas</button>
+    <button class="btn sea1btn" id="ebtn-1" onclick="setExpiredFilter(1)">First Sea</button>
+    <button class="btn sea2btn" id="ebtn-2" onclick="setExpiredFilter(2)">Second Sea</button>
+    <button class="btn sea3btn" id="ebtn-3" onclick="setExpiredFilter(3)">Third Sea</button>
+  </div>
+  <div id="expired-grid" class="grid">
+    ${expiredCards.length > 0 ? expiredCards.join("\n") : '<div class="empty">No expired servers yet — check back after the next scan.</div>'}
+  </div>
 </div>
 
 <script>
@@ -424,12 +461,10 @@ function applyBest() {
 }
 
 function switchTab(tab) {
-  document.getElementById('pane-all').style.display = tab === 'all' ? '' : 'none';
-  document.getElementById('pane-new').style.display = tab === 'new' ? '' : 'none';
-  document.getElementById('pane-best').style.display = tab === 'best' ? '' : 'none';
-  document.getElementById('tab-all').classList.toggle('active', tab === 'all');
-  document.getElementById('tab-new').classList.toggle('active', tab === 'new');
-  document.getElementById('tab-best').classList.toggle('active', tab === 'best');
+  ['all','new','best','expired'].forEach(function(t) {
+    document.getElementById('pane-' + t).style.display = t === tab ? '' : 'none';
+    document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+  });
   if (tab === 'best') applyBest();
 }
 
@@ -447,15 +482,55 @@ function setNewFilter(sea) {
   }
 }
 
-// Join button via event delegation — no inline JS in card HTML
+var expiredSeaFilter = 0;
+function setExpiredFilter(sea) {
+  expiredSeaFilter = sea;
+  for (var i = 0; i <= 3; i++) {
+    var b = document.getElementById('ebtn-' + i);
+    if (b) b.classList.toggle('active', i === sea);
+  }
+  var cards = document.querySelectorAll('#expired-grid .card');
+  for (var j = 0; j < cards.length; j++) {
+    var s = parseInt(cards[j].getAttribute('data-sea'), 10);
+    cards[j].classList.toggle('hidden', sea !== 0 && s !== sea);
+  }
+}
+
+function showToast(msg) {
+  var t = document.createElement('div');
+  t.style.cssText = 'position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#1e1e1e;border:1px solid #444;color:#fff;padding:12px 22px;border-radius:10px;font-size:.9rem;z-index:9999;pointer-events:none;box-shadow:0 4px 16px #0008';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function() { t.remove(); }, 3500);
+}
+
+// Join button via event delegation — checks server is still alive before launching
 document.addEventListener('click', function(e) {
   var btn = e.target.closest('.join-btn');
-  if (!btn) return;
+  if (!btn || btn.disabled) return;
   var placeId = btn.getAttribute('data-place');
   var jobId = btn.getAttribute('data-job');
-  if (placeId && jobId) {
-    window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + encodeURIComponent(jobId);
-  }
+  if (!placeId || !jobId) return;
+  var orig = btn.textContent;
+  btn.textContent = '⏳ Checking…';
+  btn.disabled = true;
+  fetch('/api/check?jobId=' + encodeURIComponent(jobId))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.alive) {
+        window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + encodeURIComponent(jobId);
+        setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 2500);
+      } else {
+        showToast('⚠️ Server no longer exists — try a different one');
+        btn.textContent = '❌ Expired';
+        btn.style.background = 'var(--del)';
+        setTimeout(function() { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 3500);
+      }
+    })
+    .catch(function() {
+      window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + encodeURIComponent(jobId);
+      btn.textContent = orig; btn.disabled = false;
+    });
 });
 
 // Auto-refresh every 30s
