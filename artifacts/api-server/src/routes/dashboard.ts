@@ -558,6 +558,8 @@ function stopNewPoll() {
 }
 
 function switchTab(tab) {
+  // Cancel auto-reload so it doesn't undo the tab switch
+  if (typeof autoReloadTimer !== 'undefined') { clearTimeout(autoReloadTimer); autoReloadTimer = null; }
   var tabs = ['all','new','best','expired'];
   for (var ti = 0; ti < tabs.length; ti++) {
     var t = tabs[ti];
@@ -661,8 +663,8 @@ document.addEventListener('click', function(e) {
     });
 });
 
-// Auto-refresh every 30s
-setTimeout(function() { location.reload(); }, 30000);
+// Auto-refresh every 3 minutes — cancelled the moment the user switches tab
+var autoReloadTimer = setTimeout(function() { location.reload(); }, 180000);
 
 }); // end DOMContentLoaded
 </script>
