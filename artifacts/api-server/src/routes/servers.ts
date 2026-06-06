@@ -3,6 +3,8 @@ import { db, serversTable, expiredServersTable } from "@workspace/db";
 import { desc, eq, gte } from "drizzle-orm";
 import { computeEventTimers } from "../lib/calculator.js";
 import { isWarmingUp, getUptimeSeconds } from "../lib/poller.js";
+import { checkServerAlive } from "../lib/roblox-api.js";
+import { SEA_PLACE_IDS } from "../lib/events.js";
 
 const router: IRouter = Router();
 
@@ -80,17 +82,31 @@ router.get("/check", async (req, res) => {
   try {
     const jobId = String(req.query["jobId"] ?? "").trim();
     if (!jobId) return res.status(400).json({ error: "jobId required" });
+
+    // Step 1: find the placeId for this job from our DB
     const rows = await db
       .select()
       .from(serversTable)
       .where(eq(serversTable.jobId, jobId));
-    if (rows.length > 0) {
-      return res.json({ alive: true, placeId: String(rows[0]!.placeId), jobId });
+
+    if (rows.length === 0) {
+      // Not in DB at all — definitely gone
+      return res.json({ alive: false, jobId, reason: "not_in_db" });
     }
-    return res.json({ alive: false, jobId });
+
+    const row = rows[0]!;
+    const placeId = String(row.placeId);
+
+    // Step 2: verify against Roblox's live API — no inter-page delay, stops
+    // immediately when found. This is the authoritative check.
+    const alive = await checkServerAlive(placeId, jobId);
+
+    return res.json({ alive, placeId, jobId });
   } catch (err) {
     req.log.error({ err }, "Failed to check server");
-    return res.status(500).json({ error: "Internal server error" });
+    // On error fall back to DB presence — better than blocking the user entirely
+    const rows = await db.select().from(serversTable).where(eq(serversTable.jobId, String(req.query["jobId"] ?? "")));
+    return res.json({ alive: rows.length > 0, jobId: req.query["jobId"], fallback: true });
   }
 });
 
