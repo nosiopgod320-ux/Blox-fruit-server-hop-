@@ -599,18 +599,12 @@ function showToast(msg) {
 // Detect mobile (Android / iOS)
 var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
-// Show mobile warning banner and relabel all join buttons
+// Show mobile warning banner (no DOM loop — avoids freezing with hundreds of cards)
 if (isMobile) {
   var banner = document.createElement('div');
   banner.style.cssText = 'background:#2a1a00;border-bottom:1px solid #7c5300;color:#fbbf24;padding:10px 20px;font-size:.82rem;text-align:center;line-height:1.5';
-  banner.innerHTML = '📱 <strong>Mobile detected:</strong> Roblox mobile cannot join a specific server (Error 524). ' +
-    'Tap <em>Open Game</em> to join a random server. Use PC to hop to a specific server.';
+  banner.innerHTML = '📱 <strong>Mobile:</strong> Tap any <em>Join Server</em> button to open the game page (joins a random server — mobile limitation).';
   document.body.insertBefore(banner, document.body.firstChild);
-  // Use a for-loop — NodeList.forEach is not supported on all Android browsers
-  var allJoinBtns = document.querySelectorAll('.join-btn');
-  for (var bi = 0; bi < allJoinBtns.length; bi++) {
-    if (!allJoinBtns[bi].disabled) allJoinBtns[bi].textContent = '🎮 Open Game';
-  }
 }
 
 // Join button via event delegation
