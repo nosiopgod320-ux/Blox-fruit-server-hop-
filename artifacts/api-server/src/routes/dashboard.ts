@@ -55,7 +55,7 @@ router.get("/", async (req, res) => {
         };
       })
       .sort((a, b) => a.nextEventSeconds - b.nextEventSeconds)
-      .slice(0, 300);
+      .slice(0, 100);
 
     const stats = {
       total: allRows.length,
@@ -277,6 +277,16 @@ select:focus{outline:none;border-color:var(--accent)}
 #best-grid .card.match{display:block}
 @media(max-width:600px){header{padding:12px 16px}.grid{padding:12px 16px;gap:10px}.controls{padding:12px 16px}.stats-bar{gap:12px}}
 </style>
+<script>
+/* Stubs defined in <head> so onclick= attributes never throw a ReferenceError
+   even if the user taps before the full page has finished loading. */
+function switchTab(){}
+function setFilter(){}
+function applySort(){}
+function applyBest(){}
+function setNewFilter(){}
+function setExpiredFilter(){}
+</script>
 </head>
 <body>
 <header>
@@ -596,10 +606,15 @@ function showToast(msg) {
   setTimeout(function() { t.remove(); }, 3500);
 }
 
+// Everything that touches the DOM runs after the page is fully parsed.
+// This guarantees the real function definitions replace the head stubs
+// before any user interaction is possible.
+document.addEventListener('DOMContentLoaded', function() {
+
 // Detect mobile (Android / iOS)
 var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
-// Show mobile warning banner (no DOM loop — avoids freezing with hundreds of cards)
+// Show mobile warning banner
 if (isMobile) {
   var banner = document.createElement('div');
   banner.style.cssText = 'background:#2a1a00;border-bottom:1px solid #7c5300;color:#fbbf24;padding:10px 20px;font-size:.82rem;text-align:center;line-height:1.5';
@@ -648,6 +663,8 @@ document.addEventListener('click', function(e) {
 
 // Auto-refresh every 30s
 setTimeout(function() { location.reload(); }, 30000);
+
+}); // end DOMContentLoaded
 </script>
 </body>
 </html>`;
