@@ -548,10 +548,14 @@ function stopNewPoll() {
 }
 
 function switchTab(tab) {
-  ['all','new','best','expired'].forEach(function(t) {
-    document.getElementById('pane-' + t).style.display = t === tab ? '' : 'none';
-    document.getElementById('tab-' + t).classList.toggle('active', t === tab);
-  });
+  var tabs = ['all','new','best','expired'];
+  for (var ti = 0; ti < tabs.length; ti++) {
+    var t = tabs[ti];
+    var pane = document.getElementById('pane-' + t);
+    var btn  = document.getElementById('tab-'  + t);
+    if (pane) pane.style.display = t === tab ? '' : 'none';
+    if (btn)  btn.classList.toggle('active', t === tab);
+  }
   if (tab === 'best') applyBest();
   if (tab === 'new') startNewPoll(); else stopNewPoll();
 }
@@ -602,10 +606,11 @@ if (isMobile) {
   banner.innerHTML = '📱 <strong>Mobile detected:</strong> Roblox mobile cannot join a specific server (Error 524). ' +
     'Tap <em>Open Game</em> to join a random server. Use PC to hop to a specific server.';
   document.body.insertBefore(banner, document.body.firstChild);
-  // Relabel all join buttons to make the mobile behaviour clear
-  document.querySelectorAll('.join-btn:not([disabled])').forEach(function(b) {
-    b.textContent = '🎮 Open Game';
-  });
+  // Use a for-loop — NodeList.forEach is not supported on all Android browsers
+  var allJoinBtns = document.querySelectorAll('.join-btn');
+  for (var bi = 0; bi < allJoinBtns.length; bi++) {
+    if (!allJoinBtns[bi].disabled) allJoinBtns[bi].textContent = '🎮 Open Game';
+  }
 }
 
 // Join button via event delegation
