@@ -592,13 +592,38 @@ function showToast(msg) {
   setTimeout(function() { t.remove(); }, 3500);
 }
 
-// Join button via event delegation — checks server is still alive before launching
+// Detect mobile (Android / iOS)
+var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+// Show mobile warning banner and relabel all join buttons
+if (isMobile) {
+  var banner = document.createElement('div');
+  banner.style.cssText = 'background:#2a1a00;border-bottom:1px solid #7c5300;color:#fbbf24;padding:10px 20px;font-size:.82rem;text-align:center;line-height:1.5';
+  banner.innerHTML = '📱 <strong>Mobile detected:</strong> Roblox mobile cannot join a specific server (Error 524). ' +
+    'Tap <em>Open Game</em> to join a random server. Use PC to hop to a specific server.';
+  document.body.insertBefore(banner, document.body.firstChild);
+  // Relabel all join buttons to make the mobile behaviour clear
+  document.querySelectorAll('.join-btn:not([disabled])').forEach(function(b) {
+    b.textContent = '🎮 Open Game';
+  });
+}
+
+// Join button via event delegation
 document.addEventListener('click', function(e) {
   var btn = e.target.closest('.join-btn');
   if (!btn || btn.disabled) return;
   var placeId = btn.getAttribute('data-place');
   var jobId = btn.getAttribute('data-job');
   if (!placeId || !jobId) return;
+
+  // ── Mobile path: Roblox mobile blocks joining specific instances (Error 524)
+  if (isMobile) {
+    showToast('📱 Opening game — you\'ll join a random server (mobile limitation)');
+    window.open('https://www.roblox.com/games/' + placeId, '_blank');
+    return;
+  }
+
+  // ── Desktop path: verify server is alive, then deep-link
   var orig = btn.textContent;
   btn.textContent = '⏳ Checking…';
   btn.disabled = true;
@@ -606,7 +631,7 @@ document.addEventListener('click', function(e) {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.alive) {
-        window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + encodeURIComponent(jobId);
+        window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + jobId;
         setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 2500);
       } else {
         showToast('⚠️ Server no longer exists — try a different one');
@@ -616,7 +641,8 @@ document.addEventListener('click', function(e) {
       }
     })
     .catch(function() {
-      window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + encodeURIComponent(jobId);
+      // Check failed — try direct join anyway
+      window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + jobId;
       btn.textContent = orig; btn.disabled = false;
     });
 });
