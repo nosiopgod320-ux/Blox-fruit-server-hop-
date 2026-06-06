@@ -1,4 +1,4 @@
-import { db, serversTable } from "@workspace/db";
+import { db, serversTable, expiredServersTable } from "@workspace/db";
 import { eq, lt, sql } from "drizzle-orm";
 import { fetchAllServers } from "./roblox-api.js";
 import { SEA_PLACE_IDS, MAX_SERVER_AGE_SECONDS } from "./events.js";
@@ -25,7 +25,7 @@ export async function scanSea(sea: number): Promise<void> {
 
   const toInsert = [];
   const toUpdate = [];
-  const toDelete = [];
+  const toDelete: typeof existingRows = [];
 
   for (const s of liveServers) {
     if (existingMap.has(s.id)) {
@@ -37,7 +37,7 @@ export async function scanSea(sea: number): Promise<void> {
 
   for (const row of existingRows) {
     if (!liveMap.has(row.jobId)) {
-      toDelete.push(row.jobId);
+      toDelete.push(row);
     }
   }
 
@@ -66,8 +66,22 @@ export async function scanSea(sea: number): Promise<void> {
       .where(eq(serversTable.jobId, s.id));
   }
 
-  for (const jobId of toDelete) {
-    await db.delete(serversTable).where(eq(serversTable.jobId, jobId));
+  for (const row of toDelete) {
+    await db
+      .insert(expiredServersTable)
+      .values({
+        jobId: row.jobId,
+        placeId: row.placeId,
+        sea: row.sea,
+        firstSeen: row.firstSeen,
+        lastSeen: row.lastSeen,
+        playerCount: row.playerCount,
+        maxPlayers: row.maxPlayers,
+        scanCount: row.scanCount,
+        expiredAt: nowMs,
+      })
+      .onConflictDoNothing();
+    await db.delete(serversTable).where(eq(serversTable.jobId, row.jobId));
   }
 
   logger.info(
