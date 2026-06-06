@@ -324,6 +324,10 @@ ${cardsHtml}
   <div style="padding:12px 24px;font-size:.82rem;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface)">
     🆕 <strong style="color:var(--text)">Servers found in the latest scan</strong> — these just appeared and will move to <em>All Servers</em> once the next scan confirms them (~10 min). Age starts at <strong style="color:var(--active)">0</strong> when first discovered.
   </div>
+  <div style="padding:6px 24px;font-size:.75rem;color:var(--muted);background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+    <span id="new-status">Live · updates every 60s</span>
+    <span id="new-spinner" style="display:none">⏳</span>
+  </div>
   <div id="new-controls" style="padding:12px 24px;display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
     <button class="btn active" id="nbtn-0" onclick="setNewFilter(0)">All Seas</button>
     <button class="btn sea1btn" id="nbtn-1" onclick="setNewFilter(1)">First Sea</button>
@@ -460,12 +464,96 @@ function applyBest() {
   document.getElementById('best-empty').style.display = matches.length === 0 ? '' : 'none';
 }
 
+var SEA_NAMES_JS = {1:'First Sea',2:'Second Sea',3:'Third Sea'};
+var SEA_CLASS_JS = {1:'sea-1',2:'sea-2',3:'sea-3'};
+
+function fmtAgeJs(sec) {
+  var m = Math.floor(sec / 60);
+  if (m < 60) return m + 'm';
+  var h = Math.floor(m / 60), rm = m % 60;
+  return rm > 0 ? h + 'h ' + rm + 'm' : h + 'h';
+}
+
+function buildNewCard(s) {
+  var ageSec = Math.floor((Date.now() - s.firstSeen) / 1000);
+  var seaName = SEA_NAMES_JS[s.sea] || 'Unknown';
+  var seaClass = SEA_CLASS_JS[s.sea] || '';
+  var mins = Math.max(0, Math.ceil((600 - ageSec) / 60));
+  var div = document.createElement('div');
+  div.className = 'card new-card';
+  div.setAttribute('data-sea', String(s.sea));
+  div.innerHTML =
+    '<div class="card-header">' +
+      '<span class="sea-badge ' + seaClass + '">' + seaName + '</span>' +
+      '<span class="card-age">Found ' + fmtAgeJs(ageSec) + ' ago</span>' +
+    '</div>' +
+    '<div class="card-players">👥 ' + s.playerCount + ' / ' + s.maxPlayers + ' players</div>' +
+    '<div class="events">' +
+      '<div class="ev"><span class="ev-name muted">⏳ Confirming in ~' + mins + 'm</span></div>' +
+      '<div class="ev"><span class="ev-name muted">Event timers begin after confirmation</span></div>' +
+    '</div>' +
+    '<button class="join-btn" data-place="' + s.placeId + '" data-job="' + s.jobId + '">⚓ Join Server</button>';
+  return div;
+}
+
+var newPollTimer = null;
+var newLastRefresh = 0;
+
+function refreshNewServers() {
+  var spinner = document.getElementById('new-spinner');
+  var status = document.getElementById('new-status');
+  if (spinner) spinner.style.display = '';
+  fetch('/api/new-servers')
+    .then(function(r) { return r.json(); })
+    .then(function(servers) {
+      if (spinner) spinner.style.display = 'none';
+      newLastRefresh = Date.now();
+      if (status) status.textContent = 'Updated just now · refreshes every 60s';
+
+      var grid = document.getElementById('new-grid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      if (!servers.length) {
+        grid.innerHTML = '<div class="empty">No new servers right now — scan in progress…</div>';
+      } else {
+        for (var i = 0; i < servers.length; i++) {
+          var card = buildNewCard(servers[i]);
+          if (newSeaFilter !== 0 && servers[i].sea !== newSeaFilter) {
+            card.classList.add('hidden');
+          }
+          grid.appendChild(card);
+        }
+      }
+
+      var tabNew = document.getElementById('tab-new');
+      if (tabNew) {
+        var badge = tabNew.querySelector('span');
+        if (badge) badge.textContent = servers.length;
+      }
+    })
+    .catch(function() {
+      if (spinner) spinner.style.display = 'none';
+      if (status) status.textContent = 'Refresh failed — retrying…';
+    });
+}
+
+function startNewPoll() {
+  if (newPollTimer) return;
+  refreshNewServers();
+  newPollTimer = setInterval(refreshNewServers, 60000);
+}
+
+function stopNewPoll() {
+  if (newPollTimer) { clearInterval(newPollTimer); newPollTimer = null; }
+}
+
 function switchTab(tab) {
   ['all','new','best','expired'].forEach(function(t) {
     document.getElementById('pane-' + t).style.display = t === tab ? '' : 'none';
     document.getElementById('tab-' + t).classList.toggle('active', t === tab);
   });
   if (tab === 'best') applyBest();
+  if (tab === 'new') startNewPoll(); else stopNewPoll();
 }
 
 var newSeaFilter = 0;
