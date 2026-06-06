@@ -29,6 +29,19 @@ export async function ensureSchema(): Promise<void> {
   await pool.query(`
     ALTER TABLE servers ADD COLUMN IF NOT EXISTS scan_count INTEGER NOT NULL DEFAULT 1
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expired_servers (
+      job_id        TEXT PRIMARY KEY,
+      place_id      BIGINT NOT NULL,
+      sea           INTEGER NOT NULL,
+      first_seen    BIGINT NOT NULL,
+      last_seen     BIGINT NOT NULL,
+      player_count  INTEGER NOT NULL DEFAULT 0,
+      max_players   INTEGER NOT NULL DEFAULT 0,
+      scan_count    INTEGER NOT NULL DEFAULT 1,
+      expired_at    BIGINT NOT NULL
+    )
+  `);
 }
 
 export async function wipeServers(): Promise<void> {
