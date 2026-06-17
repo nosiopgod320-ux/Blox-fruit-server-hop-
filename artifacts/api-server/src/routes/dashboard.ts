@@ -62,7 +62,7 @@ router.get("/", async (req, res) => {
       confirmed: confirmedRows.length,
       seaCounts,
       uptimeSeconds: getUptimeSeconds(),
-      warmingUp: isWarmingUp() || confirmedRows.length === 0,
+      warmingUp: confirmedRows.length === 0,
     };
 
     const newServerCards = newRows.map((s) => {
@@ -634,8 +634,9 @@ document.addEventListener('click', function(e) {
 
   // ── Mobile path: Roblox mobile blocks joining specific instances (Error 524)
   if (isMobile) {
-    showToast('📱 Opening game — you\'ll join a random server (mobile limitation)');
-    window.open('https://www.roblox.com/games/' + placeId, '_blank');
+    showToast('📱 Opened Roblox game page in a new tab — tap Play there');
+    var mWin = window.open('https://www.roblox.com/games/' + placeId, '_blank');
+    if (!mWin) { window.location.href = 'https://www.roblox.com/games/' + placeId; }
     return;
   }
 
@@ -648,9 +649,10 @@ document.addEventListener('click', function(e) {
     .then(function(data) {
       if (data.alive) {
         window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + jobId;
-        setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 2500);
+        showToast('🚀 Launching Roblox — switch to the Roblox window to load in');
+        setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 3500);
       } else {
-        showToast('⚠️ Server no longer exists — try a different one');
+        showToast('⚠️ Server expired — it was shut down. Try another one');
         btn.textContent = '❌ Expired';
         btn.style.background = 'var(--del)';
         setTimeout(function() { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 3500);
