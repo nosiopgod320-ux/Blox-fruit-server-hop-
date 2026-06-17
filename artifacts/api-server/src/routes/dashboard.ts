@@ -394,7 +394,7 @@ ${cardsHtml}
 <script>
 var seaFilter = 0;
 
-function setFilter(sea) {
+window.setFilter = function(sea) {
   seaFilter = sea;
   for (var i = 0; i <= 3; i++) {
     var b = document.getElementById('btn-' + i);
@@ -435,9 +435,9 @@ function applyFilter() {
   document.getElementById('all-empty').style.display = visible.length === 0 ? '' : 'none';
 }
 
-function applySort() { applyFilter(); }
+window.applySort = function() { applyFilter(); };
 
-function applyBest() {
+window.applyBest = function() {
   var eventKey = document.getElementById('best-event').value;
   var within = parseInt(document.getElementById('best-within').value, 10);
   var grid = document.getElementById('best-grid');
@@ -557,7 +557,7 @@ function stopNewPoll() {
   if (newPollTimer) { clearInterval(newPollTimer); newPollTimer = null; }
 }
 
-function switchTab(tab) {
+window.switchTab = function(tab) {
   // Cancel auto-reload so it doesn't undo the tab switch
   if (typeof autoReloadTimer !== 'undefined') { clearTimeout(autoReloadTimer); autoReloadTimer = null; }
   var tabs = ['all','new','best','expired'];
@@ -573,7 +573,7 @@ function switchTab(tab) {
 }
 
 var newSeaFilter = 0;
-function setNewFilter(sea) {
+window.setNewFilter = function(sea) {
   newSeaFilter = sea;
   for (var i = 0; i <= 3; i++) {
     var b = document.getElementById('nbtn-' + i);
@@ -587,7 +587,7 @@ function setNewFilter(sea) {
 }
 
 var expiredSeaFilter = 0;
-function setExpiredFilter(sea) {
+window.setExpiredFilter = function(sea) {
   expiredSeaFilter = sea;
   for (var i = 0; i <= 3; i++) {
     var b = document.getElementById('ebtn-' + i);
