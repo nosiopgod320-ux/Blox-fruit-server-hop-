@@ -640,29 +640,16 @@ document.addEventListener('click', function(e) {
     return;
   }
 
-  // ── Desktop path: verify server is alive, then deep-link
-  var orig = btn.textContent;
-  btn.textContent = '⏳ Checking…';
-  btn.disabled = true;
-  fetch('/api/check?jobId=' + encodeURIComponent(jobId))
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.alive) {
-        window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + jobId;
-        showToast('🚀 Launching Roblox — switch to the Roblox window to load in');
-        setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 3500);
-      } else {
-        showToast('⚠️ Server expired — it was shut down. Try another one');
-        btn.textContent = '❌ Expired';
-        btn.style.background = 'var(--del)';
-        setTimeout(function() { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 3500);
-      }
-    })
-    .catch(function() {
-      // Check failed — try direct join anyway
-      window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + jobId;
-      btn.textContent = orig; btn.disabled = false;
-    });
+  // ── Desktop path: open roblox:// deep-link directly — no server round-trip.
+    // The old /api/check scanned all Roblox server pages (20-30 s) causing the
+    // button to hang on "Checking…" forever. Roblox's launcher handles closed
+    // servers gracefully with its own error screen.
+    var orig = btn.textContent;
+    btn.textContent = '🚀 Launching Roblox…';
+    btn.disabled = true;
+    window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + jobId;
+    showToast('🚀 Roblox is opening — switch to the Roblox window');
+    setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 3000);
 });
 
 // Auto-refresh every 3 minutes — cancelled the moment the user switches tab
