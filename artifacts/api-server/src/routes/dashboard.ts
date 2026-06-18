@@ -620,39 +620,56 @@ var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 if (isMobile) {
   var banner = document.createElement('div');
   banner.style.cssText = 'background:#2a1a00;border-bottom:1px solid #7c5300;color:#fbbf24;padding:10px 20px;font-size:.82rem;text-align:center;line-height:1.5';
-  banner.innerHTML = '📱 <strong>Mobile:</strong> Tap any <em>Join Server</em> button to open the game page (joins a random server — mobile limitation).';
+  banner.innerHTML = '📱 <strong>Mobile:</strong> Buttons open the Roblox game page for the correct sea (any open server). For <strong>exact event servers</strong>, run <strong>BloxHop.lua</strong> inside Roblox.';
   document.body.insertBefore(banner, document.body.firstChild);
 }
 
 // Join button via event delegation
-document.addEventListener('click', function(e) {
-  var btn = e.target.closest('.join-btn');
-  if (!btn || btn.disabled) return;
-  var placeId = btn.getAttribute('data-place');
-  var jobId = btn.getAttribute('data-job');
-  if (!placeId || !jobId) return;
+  // Sea lookup by placeId (used for toast messages)
+  var PLACE_TO_SEA_NAME = {
+    '2753915549': 'First Sea',
+    '4442272183': 'Second Sea',
+    '7449423635': 'Third Sea'
+  };
 
-  // ── Mobile path: Roblox mobile blocks joining specific instances (Error 524)
-  if (isMobile) {
-    showToast('📱 Opened Roblox game page in a new tab — tap Play there');
-    var mWin = window.open('https://www.roblox.com/games/' + placeId, '_blank');
-    if (!mWin) { window.location.href = 'https://www.roblox.com/games/' + placeId; }
-    return;
-  }
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.join-btn');
+    if (!btn || btn.disabled) return;
+    var placeId = btn.getAttribute('data-place');
+    var jobId   = btn.getAttribute('data-job');
+    if (!placeId || !jobId) return;
+    var seaName = PLACE_TO_SEA_NAME[placeId] || 'the game';
 
-  // ── Desktop path: open roblox:// deep-link directly — no server round-trip.
-    // The old /api/check scanned all Roblox server pages (20-30 s) causing the
-    // button to hang on "Checking…" forever. Roblox's launcher handles closed
-    // servers gracefully with its own error screen.
+    // WHY we join without gameInstanceId:
+    //   roblox://…&gameInstanceId=Y causes Error 524 ("no permission") because:
+    //     a) You're already inside Roblox — the launcher cannot move you between
+    //        running server instances. Use BloxHop.lua (TeleportService) instead.
+    //     b) The server may have filled up or closed in the 10 min between our
+    //        scan and your click — 524 is Roblox's generic "can't join" error.
+    //     c) A small number of "Public" API servers are actually friends-only.
+    //   Joining without gameInstanceId puts you in any open server in the right
+    //   sea — instant, no 524. For the exact server with a specific event active,
+    //   use BloxHop.lua while inside Roblox (TeleportService is the only reliable
+    //   way to join a specific instance from within a running game).
+
     var orig = btn.textContent;
-    btn.textContent = '🚀 Launching Roblox…';
+    btn.textContent = '🚀 Opening ' + seaName + '…';
     btn.disabled = true;
-    window.location.href = 'roblox://experiences/start?placeId=' + placeId + '&gameInstanceId=' + jobId;
-    showToast('🚀 Roblox is opening — switch to the Roblox window');
-    setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 3000);
-});
 
-// Auto-refresh every 3 minutes — cancelled the moment the user switches tab
+    if (isMobile) {
+      var mWin = window.open('https://www.roblox.com/games/' + placeId, '_blank');
+      if (!mWin) window.location.href = 'https://www.roblox.com/games/' + placeId;
+      showToast('📱 Opened ' + seaName + ' — tap Play in the Roblox app');
+    } else {
+      // Desktop: roblox:// with ONLY placeId — no gameInstanceId — no Error 524
+      window.location.href = 'roblox://experiences/start?placeId=' + placeId;
+      showToast('🚀 Launching Roblox into ' + seaName + ' — use BloxHop.lua for exact server');
+    }
+
+    setTimeout(function() { btn.textContent = orig; btn.disabled = false; }, 3000);
+  });
+
+  // Auto-refresh every 3 minutes — cancelled the moment the user switches tab
 var autoReloadTimer = setTimeout(function() { location.reload(); }, 180000);
 
 }); // end DOMContentLoaded
