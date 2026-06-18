@@ -171,4 +171,23 @@ router.get("/best-servers", async (req, res) => {
   }
 });
 
-export default router;
+
+  // ─── TEMPORARY RESET ENDPOINT (remove after use) ──────────────────────────
+  router.post("/admin/reset", async (req, res) => {
+    const key = String(req.query["key"] ?? "");
+    if (key !== "bloxhop-reset-2026") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    try {
+      await db.delete(expiredServersTable);
+      await db.delete(serversTable);
+      req.log.info("DB reset: all servers and expired_servers deleted");
+      res.json({ ok: true, message: "All tracked servers cleared. Scanner will repopulate on next scan." });
+    } catch (err) {
+      req.log.error({ err }, "DB reset failed");
+      res.status(500).json({ error: "Reset failed", detail: String(err) });
+    }
+  });
+  // ──────────────────────────────────────────────────────────────────────────
+
+  export default router;
